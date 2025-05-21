@@ -32,8 +32,6 @@ app = Flask(__name__)
 def ping():
     return 'OK', 200
 
-if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
 def generate_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn_dog = types.KeyboardButton('/dog')
@@ -448,4 +446,5 @@ def dog (message):
         lock.release()
     
 if __name__ == '__main__':
-    bot.infinity_polling()
+    bot.infinity_polling()    
+    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
