@@ -24,18 +24,16 @@ cursor.execute('''
 ''')
 
 
-const express = require('express');
-const app = express();
+from flask import Flask
 
-// Маршрут для пинга
-app.get('/ping', (req, res) => {
-  res.sendStatus(200);
-});
+app = Flask(__name__)
 
-// Запуск приложения
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+@app.route('/ping')
+def ping():
+    return 'OK', 200
 
+if __name__ == '__main__':
+    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
 def generate_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn_dog = types.KeyboardButton('/dog')
