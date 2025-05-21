@@ -23,6 +23,18 @@ cursor.execute('''
     )
 ''')
 
+const express = require('express');
+const app = express();
+
+// Маршрут для пинга
+app.get('/ping', (req, res) => {
+  res.sendStatus(200);
+});
+
+// Запуск приложения
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
 def generate_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn_dog = types.KeyboardButton('/dog')
