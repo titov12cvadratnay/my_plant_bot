@@ -5,46 +5,45 @@ import threading
 import time
 import schedule
 
-bot = TeleBot('7711021224:AAG-Hg2FiNxMuqc2jMWlwmok4nqyNcqjzyk')
+# Импортируем необходимые модули для работы с Telegram API, SQLite базой данных, потоками и расписаниями.
 
+# Токен бота, который берётся из официального интерфейса Telegram @BotFather
+bot = TeleBot('ВАШ_ТОКЕН_БОТА')
+
+# Устанавливаем соединение с локальной базой данных SQLite
 connection = sqlite3.connect('plant.db', check_same_thread=False)
 cursor = connection.cursor()
 
+# Создание таблицы для хранения данных игроков (растений)
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS plants (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        water INTEGER DEFAULT 50,
-        level INTEGER DEFAULT 1,
-        points INTEGER DEFAULT 50,
-        mood INTEGER DEFAULT 50,
-        scin INTEGER DEFAULT 1,
-        scin_all INTEGER DEFAULT 1
+        id INTEGER PRIMARY KEY AUTOINCREMENT,      -- Уникальный идентификатор записи
+        user_id INTEGER NOT NULL,                 -- Идентификатор пользователя Telegram
+        water INTEGER DEFAULT 50,                 -- Показатель уровня воды (от 0 до 100%)
+        level INTEGER DEFAULT 1,                  -- Текущий уровень развития растения
+        points INTEGER DEFAULT 50,                -- Количество игровых монет
+        mood INTEGER DEFAULT 50,                  -- Настроение растения (чем выше, тем быстрее рост)
+        scin INTEGER DEFAULT 1,                   -- Номер выбранного скина для отображения внешнего вида растения
+        scin_all INTEGER DEFAULT 1                -- Общее количество доступных скинов для растения
     )
 ''')
 
-import os
-from flask import Flask
-
-app = Flask(__name__)
-
-@app.route('/ping')
-def ping():
-    return 'OK', 200
-
+# Генерация меню для быстрого доступа к основным действиям
 def generate_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    btn_dog = types.KeyboardButton('/dog')
-    btn_water = types.KeyboardButton('/water')
-    btn_shop = types.KeyboardButton('/shop')
-    btn_status = types.KeyboardButton('/status')
-    btn_help = types.KeyboardButton('/help')
-    btn_f = types.KeyboardButton('/flowers')
-    markup.row(btn_dog, btn_water)
-    markup.row(btn_shop, btn_f)
-    markup.row(btn_status, btn_help)
+    btn_dog = types.KeyboardButton('/dog')     # Команда поиска монет собакой
+    btn_water = types.KeyboardButton('/water')  # Команда полива растения
+    btn_shop = types.KeyboardButton('/shop')    # Магазин предметов
+    btn_status = types.KeyboardButton('/status') # Статус растения
+    btn_help = types.KeyboardButton('/help')    # Справочная информация
+    btn_f = types.KeyboardButton('/flowers')    # Управление внешностью растения
+    btn_mail = types.KeyboardButton('/mail')    # Отправка монет другому пользователю
+    markup.row(btn_help, btn_status, btn_mail)
+    markup.row(btn_shop, btn_dog, btn_water)
+    markup.row(btn_f)
     return markup
 
+# Генерация меню магазина
 def shop_menu():
     inline_menu_markup = types.InlineKeyboardMarkup(row_width=2)
     button1 = types.InlineKeyboardButton("Смотрите радуга🌈 25$", callback_data="Rainbow_ray") 
@@ -57,45 +56,44 @@ def shop_menu():
     inline_menu_markup.add(button4) 
     return inline_menu_markup
 
+# Проверяет существование пользователя в базе данных
 def you_user(user_id):
     cursor.execute('''SELECT COUNT(*) FROM plants WHERE user_id=?''', (user_id,))
     count = cursor.fetchone()[0]
     return bool(count)
 
+# Регистрация нового пользователя
 def welcome_user(user_id):
     cursor.execute(
         '''INSERT INTO plants (user_id, water, level, points, mood, scin, scin_all) VALUES (?, ?, ?, ?, ?, ?, ?)''',
         (user_id, 50, 1, 50, 50, 1, 1)  
     )
 
+# Получение текущих данных пользователя
 def data_select(user_id):
     cursor.execute('''SELECT id, user_id, water, level, points, mood FROM plants WHERE user_id=?''', (user_id,))
     result = cursor.fetchone()      
     if result is None:
         return "Игрок не найден." 
     columns = ['id', 'user_id', 'water', 'level', 'points', 'mood']
-    default_values = [None]*len(columns)
-    data = dict(zip(columns, result + tuple(default_values[len(result)-len(columns):])))
-   
-    columns = ['id', 'user_id', 'water', 'level', 'points', 'mood']
     data = dict(zip(columns, result))
     return data
 
-import threading
-from concurrent.futures import ThreadPoolExecutor
-
+# Параллельная обработка запросов с защитой блокировки базы данных
 db_lock = threading.Lock()
 executor = ThreadPoolExecutor(max_workers=5)
 
+# Обновление данных игрока в базе данных
 def data_update(water, level, points, mood, plant_id):
     with db_lock:
         cursor.execute("UPDATE plants SET water=?, level=?, points=?, mood=? WHERE id=?", (water, level, points, mood, plant_id,))
         connection.commit()
 
+# Отправка уведомлений пользователю
 def send_notification(chat_id, notification):
     executor.submit(bot.send_message, chat_id, notification)
 
-
+# Автоматическое получение урожая раз в сутки
 def harvest_fruits():
     cursor.execute("SELECT id, user_id, level, mood FROM plants")
     all_users = cursor.fetchall()
@@ -119,8 +117,10 @@ def harvest_fruits():
 
         bot.send_message(user_id, f"🌽 Ура! Пришло время собирать урожай! 🌾\nВы собрали {fruits_collected} плодов и получили {total_coins} монет. 💰\nВаш уровень вырос до {new_level}.")
 
-schedule.every().day.at("12:59").do(harvest_fruits)
+# Планировщик автоматического запуска ежедневного сбора урожая
+schedule.every().day.at("09:59").do(harvest_fruits)
 
+# Потоковая работа планировщика
 def run_scheduler():
     while True:
         schedule.run_pending()
@@ -130,6 +130,7 @@ scheduler_thread = threading.Thread(target=run_scheduler)
 scheduler_thread.daemon = True
 scheduler_thread.start()
 
+# Периодическая проверка состояния растения
 def update_plant_data(chat_id):
     global timer 
     data = data_select(chat_id)
@@ -147,15 +148,18 @@ def update_plant_data(chat_id):
 
     if new_water_ <= 1 :
         cursor.execute("DELETE FROM plants WHERE user_id=?", (chat_id,))
+        connection.commit()
         bot.send_message(chat_id, text="Ваше растение уходит от вас в далёкую страну растений😀")
         timer.cancel()
 
     timer = threading.Timer(60*20, update_plant_data, args=(chat_id,))
     timer.start()
 
+# Запуск периодической проверки состояния растения
 def start_update_timer(chat_id):
     update_plant_data(chat_id)
 
+# Возвращает общее количество доступных скинов
 def plant_all_s(plant_id):
     cursor.execute('''SELECT scin_all FROM plants WHERE user_id=?''', (plant_id,))
     result = cursor.fetchone()  
@@ -164,22 +168,23 @@ def plant_all_s(plant_id):
         return result[0]
     return 0 
 
-
+# Определение внешнего вида растения по номеру скина
 def plant_p(plant_id):
     cursor.execute('''SELECT scin FROM plants WHERE user_id=?''', (plant_id,))
     numb = cursor.fetchone()  
     connection.commit()
     if numb and numb[0] == 1:
-        return "https://i.pinimg.com/736x/3d/ee/38/3dee387811ad501b3060d121d73d7a06.jpg"
+        return "URL_СКИНА_1"
     elif numb and numb[0] == 2:
-        return "https://i.pinimg.com/736x/1f/1f/27/1f1f274c006d6ec1f586dee83f2ffbbb.jpg"
+        return "URL_СКИНА_2"
     elif numb and numb[0] == 3:
-        return "https://i.pinimg.com/736x/d2/e5/0c/d2e50c00ed009b357605f9bd085cd45a.jpg"
+        return "URL_СКИНА_3"
     elif numb and numb[0] == 4:
-        return "https://i.pinimg.com/736x/f1/47/1b/f1471b6adde5f4ffef281314a5704f74.jpg"
+        return "URL_СКИНА_4"
     else:
-        return "https://i.pinimg.com/736x/3d/ee/38/3dee387811ad501b3060d121d73d7a06.jpg"
-    
+        return "DEFAULT_URL_СКИН"
+
+# Название скина по его номеру
 def plant_s(plant_id):
     cursor.execute('''SELECT scin FROM plants WHERE user_id=?''', (plant_id,))
     numb = cursor.fetchone()     
@@ -194,8 +199,8 @@ def plant_s(plant_id):
         return "Ужасный😈🛑"
     else:
         return "Такого скина нет в игре"
-    
 
+# Первая точка входа в бот (/start)
 @bot.message_handler(commands=['start'])
 def welcome(message):
     markup = generate_menu()
@@ -204,48 +209,26 @@ def welcome(message):
     
     if not you_user(chat_id):
         welcome_user(chat_id)
-        response_text = f"Добро пожаловать в Plants lite 🤩! Вы успешно зарегистрированы! Эта сылка на мой канал https://t.me/+l9RHgfjX-Y1kZTVi /help - это помощь"
+        response_text = f"Добро пожаловать в Plants lite 🤩! Вы успешно зарегистрированы! Эта ссылка на наш канал https://t.me/+l9RHgfjX-Y1kZTVi /help - это помощь"
     else:
         response_text = f"С возвращением🤩!"
 
     start_update_timer(chat_id)
-    bot.send_photo(chat_id=chat_id, photo='https://avatars.mds.yandex.net/i?id=f92473652c7adf131c2af4a6d454b28d854c1a63-5233182-images-thumbs&n=13',caption=response_text, reply_markup=markup)
-    bot.send_sticker(chat_id, "CAACAgIAAxkBAAEOa0poGaNY8B2KTQGnhTqxHQ2y1vgCvAACjwEAAladvQqTBL2ODiSRxjYE")
+    bot.send_photo(chat_id=chat_id, photo='DEFAULT_PHOTO_URL',caption=response_text, reply_markup=markup)
+    bot.send_sticker(chat_id, "STICKER_ID")
 
+# Справочный раздел (/help)
 @bot.message_handler(commands=['help'])
 def help(message):
     markup = generate_menu()
     chat_id = message.chat.id
     text_help = (   
-        'Привет-привет! 🖐️🏻🌿 Приветствуем тебя в нашем уникальном мире зелёных любимцев! 🌵💨 Это бета версия\n\n'
-
-        'Правила игры:\n'
-        'Ты выращиваешь собственное уникальное растение, заботишься о нём, ухаживаешь и собираешь урожай. Чем лучше уход, тем счастливее и богаче ты станешь! 🌼💰\n\n'
-
-        'Команды для управления:\n'
-        'Команда	Действие	Смайлик\n'
-        '/start	Начинает игру и регистрирует нового игрока.	🌿🚀\n'
-        '/status	Показывает текущий статус растения (уровень, влажность, настроение, монеты).	📊💬\n'
-        '/water	Поливает растение водой, повышает показатель влажности.	💧🌊\n'
-        '/dog	Выполняет поиск монет с помощью собаки-помощника.	🐕💰\n'
-        '/shop	Покупает полезные предметы для повышения здоровья и роста растения.	🛒🌹\n'
-        '/help	Показывает справку по игре и доступным командам.	📝🔍\n'
-        'Механизм выращивания и заработка:\n'
-        'Рост растения: Чем выше уровень растения, тем больше плодов оно приносит и тем больше денег зарабатывается. 🌻💲\n'
-        'Сбор урожая: Каждые сутки проводится автоматический сбор урожая в 13:00, который увеличивает количество монет и поднимает уровень растения. 🌽🎁\n'
-        'Монеты: Используются для покупок полезных вещей в магазине. 💰🛒\n'
-        'Уровень растения: Повышается автоматически после каждого удачного сбора урожая. 🎇🌺\n'
-        'Интересные детали:\n'
-        'Собаки помощники: Они помогают находить скрытые сокровища и увеличивать запасы монет. 🐕💰\n'
-        'Магазин: Предлагает уникальные товары, улучшающие жизнь растения. 🛒🌼\n'
-        'Автоматический полив: Если забудешь вовремя полить растение, оно начнёт страдать, а значит, снизятся шансы вырастить большой урожай. 💧🌳\n'
-        'Заботься о своем растении, экспериментируй и наслаждайся ростом богатства и счастья! 🌳🌟\n'
+        'Справочная информация о правилах игры и доступных командах.'
     )
     bot.send_message(chat_id=chat_id, text=text_help, reply_markup=markup )
-    bot.send_sticker(chat_id, "CAACAgIAAxkBAAEOguxoKKy0jwo6GlZ2jhGyAAGZfvgRppAAAqcBAAJWnb0Ks0y7N8sBoXA2BA")
+    bot.send_sticker(chat_id, "STICKER_ID")
 
-lock = threading.Lock()
-
+# Отображение текущего статуса растения (/status)
 @bot.message_handler(commands=['status'])
 def status_command (message):
     chat_id = message.chat.id
@@ -254,18 +237,10 @@ def status_command (message):
     photo = plant_p(chat_id)
     scin = plant_s(chat_id)
     text_status = (
-    f"⭐ ВАШ СТАТУС ⭐ \n"
-    f"🔴 Твой ID: {data_dict['id']}  \n"
-    f"🔶 🌿  ID растения: {data_dict['user_id']}  \n"
-    f"🌼 💧 Вода: {data_dict['water']}%  \n"
-    f"🎇 Уровень: {data_dict['level']}  \n"
-    f"🎭 Настроение: {data_dict['mood']}% \n"
-    f"💰 Монетки: {data_dict['points']}   \n"
-    f"🎀Цветок : {scin}\n"
-    "🎄 Следите за характеристиками!"
+    f"Информация о вашем растении."
     )
     bot.send_message(chat_id=chat_id, text=text_status, reply_markup=markup )
-    bot.send_sticker(chat_id, "CAACAgIAAxkBAAEObBFoGeivGKNXO5qLU58mdDeJ1NbN9QACpQEAAladvQqGK_PpTO07ZTYE")
+    bot.send_sticker(chat_id, "STICKER_ID")
     level = int(data_dict['level'])  
     markup = generate_menu()
     bot.send_photo(
@@ -274,24 +249,51 @@ def status_command (message):
         caption=f"Цветок {scin} Ур.{level}🎇",
         reply_markup=markup
     )
-    p = 0
-    for _ in range(level):
-        bot.send_photo(
-            chat_id=chat_id,
-            photo='https://i.pinimg.com/736x/73/1c/0c/731c0cab2d76ff284e870cbb7bf8e373.jpg',
-            caption=" ",
-            reply_markup=markup
-        )
-        p  += 1
-        if p > 10:
-            bot.send_photo(
-                chat_id=chat_id,
-                photo='https://i.pinimg.com/736x/73/1c/0c/731c0cab2d76ff284e870cbb7bf8e373.jpg',
-                caption="вау растение такое огромное что у меня закончились фотки 😀",
-                reply_markup=markup
-            )
-            break
 
+# Реакция на отправку стикеров
+@bot.message_handler(content_types=['sticker'])
+def handle_sticker(message):
+    chat_id = message.chat.id
+    random_stiker = [
+        'LIST_OF_STICKERS'
+    ]
+    selected_sticker = random.choice(random_stiker)
+    bot.send_sticker(chat_id, selected_sticker)
+
+# Посылка подарка монетами другому пользователю
+USER_STATES_1 = {}
+
+@bot.message_handler(commands=['mail'])
+def mail(message):
+    chat_id = message.chat.id
+    data = data_select(chat_id)  
+    USER_STATES_1[chat_id] = "mail"  
+    bot.send_message(chat_id, f"У вас {data['points']} монеток 😀 \nХотите отправить монетки по ID( ID не растения ).\nВот как это сделать например :(1)🤩")
+    bot.send_sticker(chat_id, "STICKER_ID")
+
+@bot.message_handler(func=lambda message: USER_STATES_1.get(message.chat.id) == "mail")
+def mail_points(message):
+    chat_id = message.chat.id
+    del USER_STATES_1[chat_id]  
+    data = data_select(chat_id) 
+    text = message.text.strip().lower()
+    points_str = str(data['points']) 
+    points = int(points_str)
+    if points >= 50 : 
+        try:
+            update_points = data['points'] - 50  
+            data_update(data["water"], data["level"], update_points, data['mood'], data["id"])  
+            cursor.execute("UPDATE plants SET points=points+50 WHERE id=?", (text,))  
+            cursor.execute('''SELECT user_id FROM plants WHERE id=?''', (text,))
+            id = cursor.fetchone()
+            connection.commit()
+            bot.send_sticker(chat_id, "STICKER_ID")
+            bot.send_message(chat_id, f"🤩🤩Вы отправили монетки !😀🤩")
+            bot.send_message(id, f"🤩🤩У вас {update_points} монеток . Кто-то подарил вам 50 монеток !😀🤩")
+        except Exception as e:
+            print(e)  
+
+# Команда полива растения (/water)
 @bot.message_handler(commands=['water'])
 def water(message):
     markup = generate_menu()
@@ -312,13 +314,15 @@ def water(message):
         data_update(updated_water, data["level"], data["points"], data["mood"], data["id"])
         bot.send_message(chat_id=chat_id, text=f"Уровень воды в растении пополнен🌼 {updated_water}%💧😀", reply_markup=markup)
 
+# Открытие магазина (/shop)
 @bot.message_handler(commands=['shop'])
 def shop (message):
     chat_id = message.chat.id
     data = data_select(chat_id)
     current_point = data["points"]
-    bot.send_message(chat_id=chat_id, text=f"У вас {current_point}💰 монет 😀 \nУ каждого предмета своё свойство 🤩\nВот весь асортимент👁‍🗨", reply_markup=shop_menu())
+    bot.send_message(chat_id=chat_id, text=f"У вас {current_point}💰 монет 😀 \nУ каждого предмета своё свойство 🤩\nВот весь ассортимент👁‍🗨", reply_markup=shop_menu())
 
+# Обработка нажатия кнопок в магазине
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):
     chat_id = call.message.chat.id
@@ -349,7 +353,7 @@ def handle_callback(call):
                     shop4(chat_id)
                 else:
                     bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="У вас недостаточно монеток для покупки 🌼!")
-                    bot.send_sticker(chat_id, "CAACAgIAAxkBAAEOgP1oJ23Broxg3oXNldf85M2-vCdM7AAClQEAAladvQp2JZLWwRjgLDYE")
+                    bot.send_sticker(chat_id, "STICKER_ID")
 
             bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="Подождите покупка совершается 🌼!")
             update_point = current_point - 25
@@ -359,24 +363,26 @@ def handle_callback(call):
             lock.release()  
     else:
         bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, text="У вас недостаточно монеток для покупки 🌼!")
-        bot.send_sticker(chat_id, "CAACAgIAAxkBAAEOgP1oJ23Broxg3oXNldf85M2-vCdM7AAClQEAAladvQp2JZLWwRjgLDYE")
+        bot.send_sticker(chat_id, "STICKER_ID")
 
+# Функции показа анимаций при покупке товаров
 def shop1(chat_id):
     bot.send_message(chat_id=chat_id, text="Вы купили радугу! 🌈")
-    bot.send_animation(chat_id, animation='https://steamuserimages-a.akamaihd.net/ugc/97233690491092121/44BEC54EB389960A035A45AAF300865964F723D5/?imw=512&amp;imh=305&amp;ima=fit&amp;impolicy=Letterbox&amp;imcolor=%23000000&amp;letterbox=true', caption='Я РАДУГА')
+    bot.send_animation(chat_id, animation='ANIMATION_URL', caption='Я РАДУГА')
 def shop3(chat_id):
     bot.send_message(chat_id=chat_id, text="Вы купили дождик! 🌧️")
-    bot.send_animation(chat_id, animation='https://content.foto.my.mail.ru/community/blog_vitalderov/_groupsphoto/h-18078.jpg', caption="Дождик !")
+    bot.send_animation(chat_id, animation='ANIMATION_URL', caption="Дождик !")
 def shop2(chat_id):
     bot.send_message(chat_id=chat_id, text="Вы купили солнечный свет! ☀️")
-    bot.send_animation(chat_id, animation='https://media1.tenor.com/m/pknwZ7GL8qAAAAAd/yetee-the-yetee.gif', caption='Эй хочешь конфетку...')
+    bot.send_animation(chat_id, animation='ANIMATION_URL', caption='Эй хочешь конфетку...')
 def shop4(chat_id):
     bot.send_photo(
         chat_id=chat_id,
-        photo='https://i.pinimg.com/736x/19/57/0e/19570ee43d8b7ee0fa5d6f4213b76dfc.jpg',
+        photo='PHOTO_URL',
         caption=f"Ваше растение получило солнце☀️"
     )
- 
+
+# Система смены внешности растения (/flowers)
 USER_STATES = {}
 
 @bot.message_handler(commands=['flowers'])
@@ -421,7 +427,7 @@ def choose_scin(message):
     else:
         bot.send_message(chat_id, f"Неверная команда. Вам доступно {scin_all} скинов на цветочек 🎀. Выбери один из них, например, вот так (цветок 1) или (цветок 2)")
 
-@bot.message_handler(commands=['dog'])
+@bot.message_handler(commands=['dog']) #случайный заработок монет
 def dog (message):
     chat_id = message.chat.id
     data = data_select(chat_id)
@@ -445,6 +451,5 @@ def dog (message):
     finally:
         lock.release()
     
-if __name__ == '__main__':
+if __name__ == '__main__':#запукс цикла
     bot.infinity_polling()    
-    app.run(debug=False, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
